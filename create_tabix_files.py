@@ -85,7 +85,7 @@ def main():
 
     # Define the p-value ranges
     pval_ranges = [
-        (None, 1e-4),  # p-values <= 1e-4
+        (None, 1e-5),  # p-values <= 1e-4
         (None, 1e-1)   # p-values <= 1e-1
     ]
 
