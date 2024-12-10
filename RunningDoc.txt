@@ -1,0 +1,44 @@
+STEP - 1:
+/* For create_tabix_files.py*/
+Basic usage (process all files):
+
+1. python script.py -i /path/to/input/folder -o /path/to/output/folder
+
+2. Process only mrmega files:
+
+    python script.py -i /path/to/input/folder -o /path/to/output/folder -s mrmega
+
+3. Process specific phenotype and cohort:
+
+    python script.py -i /path/to/input/folder -o /path/to/output/folder -p phenotype1 -c cohort1
+
+4. The script now supports these command-line arguments:
+
+-i or --input_folder: Input folder path (required)
+-o or --output_folder: Output folder path (required)
+-s or --software: Software type to process (mrmega, gwama, or both) (optional, defaults to both)
+-p or --phenotype: Specific phenotype to process (optional)
+-c or --cohort: Specific cohort to process (optional)
+
+You can also get help on the command-line arguments by running:
+python script.py --help
+
+
+STEP-2: Run Create all consolidated_data
+
+/*For Consolidate JSON FILES */
+1. This is the first file you need to run to generate the consolidated file required in next step
+# Process both MRMEGA and GWAMA files
+python create_all_consolidated_data.py -i /input/dir -o /output/dir
+
+FILES CREATED:
+consolidated_snp_data_mrmega.json.gz
+consolidated_snp_data_gwama.json.gz
+
+STEP-3: match_all_snps.py
+/*For creating interactive snps */
+python match_all_snps.py -i /tabix/files/dir -c /output/dir -o /output/dir
+
+Files Created:
+matched_snp_data_mrmega.json.gz
+matched_snp_data_gwama.json.gz
