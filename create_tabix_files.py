@@ -4,20 +4,51 @@ import base64
 import glob
 import argparse
 
-def create_tabix_file(input_file, output_file, pval_min=None, pval_max=None):
-    # Step 1: Sort the input file using Unix sort
+# Column mapping definitions
+COLUMN_MAPPINGS = {
+    'mrmega': {
+        'id': 0,            # #ID
+        'chr': 1,          # CHR
+        'pos': 2,          # POS
+        'ref': 3,          # REF
+        'alt': 4,          # ALT
+        'beta': 5,         # BETA
+        'se': 6,           # SE
+        'pval': 7,         # P
+        'aaf': 12,         # AAF
+        'n': 16,           # N
+        'n_study': 18      # N_STUDY
+    },
+    'gwama': {
+        'id': 0,           # #ID
+        'chr': 1,          # CHR
+        'pos': 2,          # POS
+        'ref': 3,          # REF
+        'alt': 4,          # ALT
+        'beta': 5,         # BETA
+        'se': 6,           # SE
+        'pval': 7,         # P
+        'aaf': 12,         # AAF
+        'n': 16,           # N
+        'n_study': 18      # N_STUDY
+    }
+}
+
+def create_tabix_file(input_file, output_file, software_type, pval_min=None, pval_max=None):
+    mapping = COLUMN_MAPPINGS[software_type]
     sorted_file = f"{output_file}.sorted"
     filtered_file = f"{output_file}.filtered"
     print(f"Sorting data for {output_file}...")
 
-    # Modify the sorting command to sort by chromosome, position, and pval
+    # Modify sorting command to use correct p-value column based on software type
+    pval_col = mapping['pval'] + 1  # Add 1 because sort command uses 1-based indexing
     if input_file.endswith('.gz'):
-        sort_cmd = f"(zcat {input_file} | head -n 1 && zcat {input_file} | tail -n +2 | sort -k2,2V -k3,3n -k15,15n) > {sorted_file}"
+        sort_cmd = f"(zcat {input_file} | head -n 1 && zcat {input_file} | tail -n +2 | sort -k2,2V -k3,3n -k{pval_col},{pval_col}n) > {sorted_file}"
     else:
-        sort_cmd = f"(head -n 1 {input_file} && tail -n +2 {input_file} | sort -k2,2V -k3,3n -k15,15n) > {sorted_file}"
+        sort_cmd = f"(head -n 1 {input_file} && tail -n +2 {input_file} | sort -k2,2V -k3,3n -k{pval_col},{pval_col}n) > {sorted_file}"
     subprocess.run(sort_cmd, shell=True, check=True)
 
-    # Step 2: Filter the sorted file based on p-value range
+    # Filter based on p-value range
     print(f"Filtering data with p-value in range {pval_min} to {pval_max}...")
 
     with open(sorted_file, 'r') as sorted_fh, open(filtered_file, 'w') as filtered_fh:
@@ -26,26 +57,22 @@ def create_tabix_file(input_file, output_file, pval_min=None, pval_max=None):
         for line in sorted_fh:
             fields = line.strip().split('\t')
             try:
-                pval = float(fields[14])  # Assuming p-value is in the 15th column (index 14)
-
-                # Check if the pval falls within the specified range
+                pval = float(fields[mapping['pval']])  # Use correct p-value column from mapping
                 if (pval_min is None or pval >= pval_min) and (pval_max is None or pval <= pval_max):
                     filtered_fh.write(line)
             except (ValueError, IndexError) as e:
                 print(f"Skipping line due to error: {e}")
     
-    # Step 3: Compress the filtered file using bgzip
+    # Compress with bgzip
     output_gz_file = f"{output_file}.gz"
     print(f"Compressing filtered file to {output_gz_file} using bgzip...")
     subprocess.run(['bgzip', '-c', filtered_file], stdout=open(output_gz_file, 'wb'), check=True)
 
-    # Step 4: Create a Tabix index
+    # Create Tabix index
     print(f"Creating Tabix index for {output_gz_file}...")
-
-    # Tabix indexing on chromosome (-s 2), position (-b 3, -e 3)
     subprocess.run(['tabix', '-s', '2', '-b', '3', '-e', '3', '-S', '1', output_gz_file], check=True)
 
-    # Step 5: Convert files to base64 to store in Cosmos DB (or wherever needed)
+    # Convert to base64
     print("Encoding files to base64...")
     with open(output_gz_file, "rb") as f:
         encoded_gz = base64.b64encode(f.read()).decode('utf-8')
@@ -54,23 +81,18 @@ def create_tabix_file(input_file, output_file, pval_min=None, pval_max=None):
 
     print(f"Compressed file and index created: {output_gz_file} and {output_gz_file}.tbi")
 
-    # Clean up temporary files
+    # Clean up
     os.remove(sorted_file)
     os.remove(filtered_file)
 
     return encoded_gz, encoded_tbi
 
 def main():
-    # Set up argument parser
     parser = argparse.ArgumentParser(description='Process GWAS summary statistics files and create tabix indexes.')
-    
-    # Required arguments
     parser.add_argument('-i', '--input_folder', required=True,
                         help='Input folder containing the summary statistics files')
     parser.add_argument('-o', '--output_folder', required=True,
                         help='Output folder for processed files')
-    
-    # Optional arguments
     parser.add_argument('-s', '--software', choices=['mrmega', 'gwama', 'both'], default='both',
                         help='Software type to process (mrmega, gwama, or both) (default: both)')
     parser.add_argument('-p', '--phenotype', 
@@ -80,24 +102,19 @@ def main():
     
     args = parser.parse_args()
 
-    # Create output directory if it doesn't exist
     os.makedirs(args.output_folder, exist_ok=True)
 
-    # Define the p-value ranges
+    # Define p-value ranges
     pval_ranges = [
         (None, 1e-5),  # p-values <= 1e-4
         (None, 1e-1)   # p-values <= 1e-1
     ]
 
-    # Define which software types to process
-    if args.software == 'both':
-        software_types = ["mrmega", "gwama"]
-    else:
-        software_types = [args.software]
+    # Define software types to process
+    software_types = ["mrmega", "gwama"] if args.software == 'both' else [args.software]
 
-    # Process each software type
     for software in software_types:
-        # Construct the file pattern based on arguments
+        # Construct file pattern
         if args.phenotype and args.cohort:
             pattern = f"{args.phenotype}.{args.cohort}.{software}.sumstats.txt.gz"
         elif args.phenotype:
@@ -114,15 +131,12 @@ def main():
             print(f"No files found matching pattern: {pattern}")
             continue
         
-        # Process each file
         for input_file in sumstats_files:
-            # Extract phenotype and cohort from filename
             filename = os.path.basename(input_file)
             components = filename.split('.')
             phenotype = components[0]
             cohort = components[1]
             
-            # Process each p-value range
             for pval_min, pval_max in pval_ranges:
                 if pval_max is None:
                     pval_range_str = f"{pval_min}_and_above"
@@ -131,14 +145,13 @@ def main():
                 else:
                     pval_range_str = f"{pval_min}_to_{pval_max}"
                 
-                # Construct the output filename
                 output_file = os.path.join(
                     args.output_folder,
                     f"{phenotype}.{cohort}.{software}_pval_{pval_range_str}"
                 )
                 
                 print(f"Processing {phenotype}-{cohort}-{software} for p-value range {pval_min} to {pval_max if pval_max else 'above'}...")
-                encoded_gz, encoded_tbi = create_tabix_file(input_file, output_file, pval_min, pval_max)
+                encoded_gz, encoded_tbi = create_tabix_file(input_file, output_file, software, pval_min, pval_max)
 
 if __name__ == "__main__":
     main()
